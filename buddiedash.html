@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Buddie Rush</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+  body {
+    margin: 0;
+    background: #6ec9ff;
+    display: flex;
+    justify-content: center;
+    padding-top: 20px;
+    font-family: sans-serif;
+  }
+
+  #game {
+    width: 360px;
+    height: 640px;
+    background-image: url('background.png');
+    background-size: cover;
+    background-position: center bottom;
+    position: relative;
+    overflow: hidden;
+    border: 4px solid #074f83;
+    border-radius: 20px;
+  }
+
+  #ground {
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    height: 90px;
+    background: transparent;
+  }
+
+  #buddie {
+    position: absolute;
+    width: 90px;
+    left: 40px;
+    bottom: 90px;
+    transition: filter 0.2s ease;
+  }
+
+  #buddie img {
+    width: 100%;
+  }
+
+  /* Objects */
+  .object {
+    position: absolute;
+  }
+
+  .saw {
+    width: 80px; /* no animation */
+  }
+
+  .fire {
+    width: 80px;
+    animation: fireFlicker 0.4s ease-in-out infinite;
+  }
+
+  .acorn {
+    width: 55px;
+    animation: acornHover 1.2s ease-in-out infinite;
+  }
+
+  #score {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    color: white;
+    font-size: 32px;
+    font-weight: bold;
+  }
+
+  #highscore {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    color: white;
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  #start,
+  #over {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    color: white;
+    font-size: 24px;
+  }
+
+  #over { display: none; }
+
+  button {
+    padding: 10px 25px;
+    background: #32c656;
+    color: white;
+    font-size: 20px;
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    margin-top: 12px;
+  }
+
+  /* Immune glow */
+  #buddie.immune {
+    animation: shieldPulse 0.8s ease-in-out infinite;
+  }
+
+  /* Screen shake */
+  #game.shake {
+    animation: screenShake 0.3s ease;
+  }
+
+  /* Particles */
+  .particle {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    opacity: 0.9;
+    animation: particleRise 0.6s linear forwards;
+    pointer-events: none;
+  }
+
+  .particle.acorn { background: #ffd54f; }
+  .particle.hit { background: #ff5252; }
+
+  /* Keyframes */
+  @keyframes fireFlicker {
+    0% { transform: scale(1); filter: brightness(1); }
+    50% { transform: scale(1.08); filter: brightness(1.3); }
+    100% { transform: scale(1); filter: brightness(1); }
+  }
+
+  @keyframes acornHover {
+    0% { transform: translateY(0) rotate(0deg); }
+    50% { transform: translateY(6px) rotate(5deg); }
+    100% { transform: translateY(0) rotate(0deg); }
+  }
+
+  @keyframes shieldPulse {
+    0% { filter: drop-shadow(0 0 0px #ffee58); }
+    50% { filter: drop-shadow(0 0 14px #ffee58); }
+    100% { filter: drop-shadow(0 0 0px #ffee58); }
+  }
+
+  @keyframes screenShake {
+    0% { transform: translate(0,0); }
+    25% { transform: translate(-4px,2px); }
+    50% { transform: translate(4px,-2px); }
+    75% { transform: translate(-3px,3px); }
+    100% { transform: translate(0,0); }
+  }
+
+  @keyframes particleRise {
+    0% { transform: translate(0,0); opacity: 1; }
+    100% { transform: translate(0,30px); opacity: 0; }
+  }
+</style>
+</head>
+<body>
+
+<div id="game">
+
+  <div id="highscore">High: 0</div>
+  <div id="score">0</div>
+
+  <div id="buddie">
+    <img src="IMG_7429.png">
+  </div>
+
+  <div id="ground"></div>
+
+  <div id="start">
+    Buddie's Forest Hop<br>
+    <button onclick="startGame()">Start</button>
+  </div>
+
+  <div id="over">
+    Game Over<br>
+    <div id="final-score"></div>
+    <button id="continue-btn" onclick="watchAdContinue()" style="display:none;">Watch Ad to Continue</button>
+    <button onclick="restartGame()">Restart</button>
+  </div>
+
+</div>
+
+<script>
+const game = document.getElementById("game");
+const buddie = document.getElementById("buddie");
+const scoreEl = document.getElementById("score");
+const highScoreEl = document.getElementById("highscore");
+const startOverlay = document.getElementById("start");
+const overOverlay = document.getElementById("over");
+const finalScoreEl = document.getElementById("final-score");
+const continueBtn = document.getElementById("continue-btn");
+
+let running = false;
+let score = 0;
+
+let buddieY = 90;
+let velocity = 0;
+
+let gravity = -2400;
+let baseJumpForce = 900;
+let currentJumpForce = baseJumpForce;
+
+let onGround = true;
+let maxJumps = 3;
+let jumpsRemaining = maxJumps;
+let jumpBoost = 250;
+
+let objects = [];
+let lastTime = 0;
+let spawnTimer = 0;
+let acornTimer = 0;
+let acornInterval = 10;
+
+let immune = false;
+let immuneTimer = 0;
+
+/* Speed scaling */
+let speedMultiplier = 1;
+
+/* High score per device */
+let highScore = Number(localStorage.getItem("buddieHighScore") || 0);
+highScoreEl.textContent = "High: " + highScore;
+
+/* Only allow one continue per page load */
+let hasContinued = false;
+
+/* Update speed based on score - OPTION C */
+function updateSpeed() {
+  if (score >= 250) speedMultiplier = 3.0;
+  else if (score >= 60) speedMultiplier = 2.2;
+  else if (score >= 33) speedMultiplier = 1.8;
+  else if (score >= 20) speedMultiplier = 1.5;
+  else speedMultiplier = 1;
+}
+
+/* START GAME */
+function startGame() {
+  running = true;
+  startOverlay.style.display = "none";
+  overOverlay.style.display = "none";
+
+  score = 0;
+  scoreEl.textContent = "0";
+
+  buddieY = 90;
+  velocity = 0;
+  onGround = true;
+  jumpsRemaining = maxJumps;
+
+  objects.forEach(o => o.el.remove());
+  objects = [];
+
+  immune = false;
+  immuneTimer = 0;
+  buddie.classList.remove("immune");
+  buddie.style.filter = "none";
+
+  continueBtn.style.display = "none";
+
+  acornTimer = 0;
+  acornInterval = 8 + Math.random() * 4;
+
+  speedMultiplier = 1;  // reset speed at new game
+
+  lastTime = performance.now();
+  requestAnimationFrame(update);
+}
+
+function restartGame() {
+  startGame();
+}
+
+/* JUMP */
+function jump() {
+  if (!running) return;
+  if (jumpsRemaining <= 0) return;
+
+  jumpsRemaining--;
+
+  const j = maxJumps - jumpsRemaining;
+  currentJumpForce = baseJumpForce + (j - 1) * jumpBoost;
+
+  velocity = currentJumpForce;
+  onGround = false;
+
+  buddie.style.transform = "scale(1.05,0.9) rotate(-8deg)";
+  setTimeout(() => buddie.style.transform = "scale(1,1) rotate(0deg)", 150);
+}
+
+window.addEventListener("mousedown", jump);
+window.addEventListener("keydown", e => {
+  if (e.code === "Space" || e.code === "ArrowUp") jump();
+});
+
+/* SPAWN HAZARDS */
+function spawnHazard() {
+  let el = document.createElement("img");
+
+  let isFire = Math.random() < 0.4;
+  el.src = isFire ? "buddiedash_fire.png" : "saw.png";
+
+  el.className = isFire ? "object fire" : "object saw";
+
+  el.style.bottom = isFire ? "90px" : "70px";
+  el.style.left = "360px";
+
+  game.appendChild(el);
+
+  objects.push({
+    type: isFire ? "fire" : "saw",
+    x: 360,
+    width: 80,
+    el: el,
+    passed: false
+  });
+}
+
+/* SPAWN ACORNS */
+function spawnAcorn() {
+  let el = document.createElement("img");
+  el.src = "buddiedash_acorn.png";
+  el.className = "object acorn";
+
+  let vertical = Math.random() < 0.5 ? 90 : 250;
+  el.style.bottom = vertical + "px";
+
+  let startX = 480;
+  el.style.left = startX + "px";
+
+  game.appendChild(el);
+
+  objects.push({
+    type: "acorn",
+    x: startX,
+    width: 55,
+    el: el,
+    passed: false
+  });
+
+  acornTimer = 0;
+  acornInterval = 8 + Math.random() * 4;
+}
+
+/* PARTICLES */
+function spawnParticles(count, kind) {
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement("div");
+    p.className = "particle " + kind;
+
+    const baseLeft = 40 + 45;
+    const baseBottom = buddieY + 40;
+
+    const offsetX = (Math.random() - 0.5) * 40;
+    const offsetY = (Math.random() - 0.5) * 20;
+
+    p.style.left = (baseLeft + offsetX) + "px";
+    p.style.bottom = (baseBottom + offsetY) + "px";
+
+    game.appendChild(p);
+    setTimeout(() => p.remove(), 650);
+  }
+}
+
+/* SCREEN SHAKE */
+function shakeScreen() {
+  game.classList.add("shake");
+  setTimeout(() => game.classList.remove("shake"), 300);
+}
+
+/* WATCH AD TO CONTINUE */
+function watchAdContinue() {
+  if (hasContinued || running) return;
+
+  hasContinued = true;
+  continueBtn.style.display = "none";
+  overOverlay.style.display = "none";
+
+  // Clear hazards on screen
+  objects.forEach(o => o.el.remove());
+  objects = [];
+
+  // Safe respawn
+  buddieY = 90;
+  velocity = 0;
+  onGround = true;
+  jumpsRemaining = maxJumps;
+
+  // Reset speed to normal after revive (your choice B)
+  speedMultiplier = 1;
+
+  // 3 seconds of immunity
+  immune = true;
+  immuneTimer = 3;
+  buddie.classList.add("immune");
+
+  running = true;
+  lastTime = performance.now();
+  requestAnimationFrame(update);
+}
+
+/* GAME LOOP */
+function update(t) {
+  let dt = (t - lastTime) / 1000;
+  lastTime = t;
+
+  velocity += gravity * dt;
+  buddieY += velocity * dt;
+
+  if (buddieY <= 90) {
+    buddieY = 90;
+    velocity = 0;
+    if (!onGround) {
+      onGround = true;
+      jumpsRemaining = maxJumps;
+    }
+  }
+
+  buddie.style.bottom = buddieY + "px";
+
+  // Speed-based spawning
+  spawnTimer += dt * speedMultiplier;
+  if (spawnTimer > 1.4) {
+    spawnHazard();
+    spawnTimer = 0;
+  }
+
+  acornTimer += dt * speedMultiplier;
+  if (acornTimer > acornInterval) {
+    spawnAcorn();
+  }
+
+  if (immune) {
+    immuneTimer -= dt;
+    if (immuneTimer <= 0) {
+      immune = false;
+      immuneTimer = 0;
+      buddie.classList.remove("immune");
+      buddie.style.filter = "none";
+    }
+  }
+
+  objects.forEach((o, i) => {
+    o.x -= 250 * speedMultiplier * dt;
+    o.el.style.left = o.x + "px";
+
+    if (!o.passed && o.x + o.width < 40) {
+      score++;
+      scoreEl.textContent = score;
+      o.passed = true;
+    }
+
+    if (o.x < -200) {
+      o.el.remove();
+      objects.splice(i, 1);
+      return;
+    }
+
+    let budLeft = 55;
+    let budRight = budLeft + 55;
+    let budBottom = buddieY + 10;
+    let budTop = budBottom + 55;
+
+    let oLeft = o.x;
+    let oRight = o.x + o.width;
+
+    let oBottom = parseInt(o.el.style.bottom);
+    let oTop = oBottom + 60;
+
+    let overlapX = budRight > oLeft && budLeft < oRight;
+    let overlapY = budBottom < oTop && budTop > oBottom;
+
+    if (overlapX && overlapY && o.type === "acorn") {
+      immune = true;
+      immuneTimer = 5;
+      buddie.classList.add("immune");
+      spawnParticles(6, "acorn");
+
+      o.el.remove();
+      objects.splice(i, 1);
+      return;
+    }
+
+    if (overlapX && overlapY && (o.type === "saw" || o.type === "fire")) {
+      if (!immune) {
+        spawnParticles(10, "hit");
+        shakeScreen();
+        return gameOver();
+      }
+    }
+  });
+
+  // Update speed based on latest score (extreme scaling)
+  updateSpeed();
+
+  if (running) requestAnimationFrame(update);
+}
+
+/* GAME OVER */
+function gameOver() {
+  running = false;
+
+  if (score > highScore) {
+    highScore = score;
+    localStorage.setItem("buddieHighScore", highScore);
+    highScoreEl.textContent = "High: " + highScore;
+  }
+
+  finalScoreEl.textContent = "Score: " + score;
+
+  if (score >= 20 && !hasContinued) {
+    continueBtn.style.display = "inline-block";
+  } else {
+    continueBtn.style.display = "none";
+  }
+
+  overOverlay.style.display = "flex";
+}
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
